@@ -27,6 +27,10 @@ from aioquic.quic.events import DatagramFrameReceived, ProtocolNegotiated, QuicE
 from aioquic.quic.logger import QuicFileLogger
 from aioquic.tls import SessionTicket
 
+import cv2
+import io
+import numpy as np
+
 try:
     import uvloop
 except ImportError:
@@ -326,6 +330,7 @@ class HttpServerProtocol(QuicConnectionProtocol):
         super().__init__(*args, **kwargs)
         self._handlers: Dict[int, Handler] = {}
         self._http: Optional[HttpConnection] = None
+        self.image_bytes = None
 
     def http_event_received(self, event: H3Event) -> None:
         if isinstance(event, HeadersReceived) and event.stream_id not in self._handlers:
@@ -355,6 +360,19 @@ class HttpServerProtocol(QuicConnectionProtocol):
             path = path_bytes.decode()
             self._quic._logger.info("HTTP request %s %s", method, path)
 
+            '''
+            Image streaming
+            '''
+            if self.image_bytes is None:
+                self.image_bytes = bytes()
+            else:
+                image_bytes = self.image_bytes
+                self.image_bytes = bytes()
+                img_stream = io.BytesIO(image_bytes)
+                image = cv2.imdecode(np.frombuffer(img_stream.read(), np.uint8), cv2.IMREAD_COLOR)
+                cv2.imshow('Processed Image', image)
+                k = cv2.waitKey(1)
+                
             # FIXME: add a public API to retrieve peer address
             client_addr = self._http._quic._network_paths[0].addr
             client = (client_addr[0], client_addr[1])
@@ -436,6 +454,13 @@ class HttpServerProtocol(QuicConnectionProtocol):
             isinstance(event, (DataReceived, HeadersReceived))
             and event.stream_id in self._handlers
         ):
+            '''
+            Image streaming
+            '''
+            if self.image_bytes is None:
+                self.image_bytes = bytes()
+            self.image_bytes += event.data
+
             handler = self._handlers[event.stream_id]
             handler.http_event_received(event)
         elif isinstance(event, DatagramReceived):

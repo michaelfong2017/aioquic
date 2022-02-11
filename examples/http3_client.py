@@ -28,6 +28,8 @@ from aioquic.quic.events import QuicEvent
 from aioquic.quic.logger import QuicFileLogger
 from aioquic.tls import CipherSuite, SessionTicket
 
+import cv2
+
 try:
     import uvloop
 except ImportError:
@@ -247,13 +249,15 @@ async def perform_http_request(
     client: HttpClient,
     url: str,
     data: Optional[str],
+    data_bytes: Optional[bytes],
     include: bool,
     output_dir: Optional[str],
 ) -> None:
     # perform request
     start = time.time()
-    if data is not None:
-        data_bytes = data.encode()
+    if data is not None or data_bytes is not None:
+        if data_bytes is None:
+            data_bytes = data.encode()
         http_events = await client.post(
             url,
             data=data_bytes,
@@ -349,6 +353,7 @@ async def run(
     configuration: QuicConfiguration,
     urls: List[str],
     data: Optional[str],
+    data_bytes: Optional[bytes],
     include: bool,
     output_dir: Optional[str],
     local_port: int,
@@ -391,18 +396,32 @@ async def run(
 
             await ws.close()
         else:
-            # perform request
-            coros = [
-                perform_http_request(
-                    client=client,
-                    url=url,
-                    data=data,
-                    include=include,
-                    output_dir=output_dir,
-                )
-                for url in urls
-            ]
-            await asyncio.gather(*coros)
+            ##########
+            cap = cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+            while True:
+                # get image from web camera
+                ret, frame = cap.read()
+
+                # convert to jpeg and save in variable
+                image_bytes = cv2.imencode('.jpg', frame)[1].tobytes()
+
+                ##########
+                # perform request
+                coros = [
+                    perform_http_request(
+                        client=client,
+                        url=url,
+                        data=data,
+                        data_bytes=image_bytes,
+                        include=include,
+                        output_dir=output_dir,
+                    )
+                    for url in urls
+                ]
+                await asyncio.gather(*coros)
 
             # process http pushes
             process_http_pushes(client=client, include=include, output_dir=output_dir)
@@ -531,6 +550,7 @@ if __name__ == "__main__":
             configuration=configuration,
             urls=args.url,
             data=args.data,
+            data_bytes=None,
             include=args.include,
             output_dir=args.output_dir,
             local_port=args.local_port,
